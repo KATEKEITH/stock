@@ -1,71 +1,133 @@
 package com.example.stock.service;
 
 import com.example.stock.domain.Stock;
-import com.example.stock.repository.StockRepository;
-import com.example.stock.service.PessimisticLockStockService;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @SpringBootTest
 class StockServiceTest {
 
     @Autowired
-    private PessimisticLockStockService stockService;
-
-    @Autowired
-    private StockRepository stockRepository;
+    private StockService stockService;
+    private String stockKey;
+    private Stock peenut;
 
     @BeforeEach
-    public void before() {
-        Stock stock = new Stock(1L, 100L);
+    void 재고_키_세팅(){
+        final String name = "peanut";
 
-        stockRepository.saveAndFlush(stock);
-    }
+        final String keyId = "001";
 
-    @AfterEach
-    public void after() {
-        stockRepository.deleteAll();
-    }
+        final int amount = 100;
 
-    @Test
-    public void stock_decrease() {
-        stockService.decrease(1L, 1L);
+        final Stock peenut = new Stock(name, keyId, amount);
 
-        Stock stock = stockRepository.findById(1L).orElseThrow();
-
-        assertEquals(99, stock.getQuantity());
+        this.stockKey = stockService.keyResolver(peenut.getName(), peenut.getKeyId());
+        this.peenut = peenut;
+        stockService.setStock(this.stockKey, amount);
     }
 
     @Test
-    public void 동시에_100개의_요청() throws InterruptedException {
-        int threadCount = 100;
-        ExecutorService executorService = Executors.newFixedThreadPool(32);
-        CountDownLatch latch = new CountDownLatch(threadCount);
+    @Order(1)
+    void 상품_수량_확인(){
+        final int amount = this.peenut.getAmount();
+        final int currentCount = stockService.currentStock(stockKey);
+        assertEquals(amount, currentCount);
+    }
 
-        for (int i = 0; i < threadCount; i++) {
-            executorService.submit(() -> {
-                try {
-                    stockService.decrease(1L, 1L);
-                } finally {
-                    latch.countDown();
-                }
-            });
+    @Test
+    @Order(2)
+    void 상품_재고_카운트만큼_감소(){
+        final int amount = this.peenut.getAmount();
+        final int count = 2;
+        stockService.decrease(this.stockKey, count);
+        final int currentCount = stockService.currentStock(stockKey);
+        assertEquals(amount - count, currentCount);
+    }
+
+    @Test
+    @Order(3)
+    void lockX_땅콩_100개를_사람_100명이_2개씩_구매() throws InterruptedException {
+        final int people = 100;
+        final int count = 2;
+        final int soldOut = 0;
+
+        final CountDownLatch countDownLatch = new CountDownLatch(people);
+
+        List<Thread> workers = Stream
+                .generate(() -> new Thread(new BuyNoLockWorker(this.stockKey, count, countDownLatch)))
+                .limit(people)
+                .collect(Collectors.toList());
+        workers.forEach(Thread::start);
+        countDownLatch.await();
+
+        final int currentCount = stockService.currentStock(stockKey);
+        assertNotEquals(soldOut, currentCount);
+    }
+
+    @Test
+    @Order(4)
+    void lockO_땅콩_100개를_사람_100명이_2개씩_구매() throws InterruptedException {
+        final int people = 100;
+        final int count = 2;
+        final int soldOut = 0;
+
+        final CountDownLatch countDownLatch = new CountDownLatch(people);
+
+        List<Thread> workers = Stream
+                .generate(() -> new Thread(new BuyWorker(this.stockKey, count, countDownLatch)))
+                .limit(people)
+                .collect(Collectors.toList());
+        workers.forEach(Thread::start);
+        countDownLatch.await();
+
+        final int currentCount = stockService.currentStock(this.stockKey);
+        assertEquals(soldOut, currentCount);
+    }
+
+    private class BuyWorker implements Runnable {
+        private String stockKey;
+        private int count;
+        private CountDownLatch countDownLatch;
+
+        public BuyWorker(String stockKey, int count, CountDownLatch countDownLatch) {
+            this.stockKey = stockKey;
+            this.count = count;
+            this.countDownLatch = countDownLatch;
         }
 
-        latch.await();
-
-        Stock stock = stockRepository.findById(1L).orElseThrow();
-
-        assertEquals(0, stock.getQuantity());
+        @Override
+        public void run() {
+            stockService.decrease(this.stockKey, count);
+            countDownLatch.countDown();
+        }
     }
+
+    private class BuyNoLockWorker implements Runnable{
+        private String stockKey;
+        private int count;
+        private CountDownLatch countDownLatch;
+
+        public BuyNoLockWorker(String stockKey, int count, CountDownLatch countDownLatch) {
+            this.stockKey = stockKey;
+            this.count = count;
+            this.countDownLatch = countDownLatch;
+        }
+
+        @Override
+        public void run() {
+            stockService.decreaseNoLock(this.stockKey, count);
+            countDownLatch.countDown();
+        }
+    }
+
 }

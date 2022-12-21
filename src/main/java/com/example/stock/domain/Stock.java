@@ -1,38 +1,27 @@
 package com.example.stock.domain;
 
-import javax.persistence.*;
 
-@Entity
 public class Stock {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private String name;
+    private String keyId;
+    private int amount;
 
-    private Long productId;
-
-    private Long quantity;
-
-    @Version
-    private Long version;
-
-    public Stock() {
+    public Stock(String name, String keyId, int amount) {
+        this.name = name;
+        this.keyId = keyId;
+        this.amount = amount;
     }
 
-    public Stock(Long productId, Long quantity) {
-        this.productId = productId;
-        this.quantity = quantity;
+    public String getName() {
+        return name;
     }
 
-    public Long getQuantity() {
-        return quantity;
+    public String getKeyId() {
+        return keyId;
     }
 
-    public void decrease(Long quantity) {
-        if (this.quantity - quantity < 0) {
-            throw new RuntimeException("foo");
-        }
-
-        this.quantity = this.quantity - quantity;
+    public int getAmount() {
+        return amount;
     }
 }
